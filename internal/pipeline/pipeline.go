@@ -116,9 +116,15 @@ func (p *Pipeline) RunWithOptions(ctx context.Context, j *job.Job, txn firefly.T
 			slog.Warn("failed to fetch expense accounts, continuing without destination matching", "error", err)
 		}
 	}
-	clAccounts := make([]classifier.AccountCandidate, len(expenseAccounts))
-	for i, a := range expenseAccounts {
-		clAccounts[i] = classifier.AccountCandidate{ID: a.ID, Name: a.Name}
+	clAccounts := make([]classifier.AccountCandidate, 0, len(expenseAccounts))
+	for _, a := range expenseAccounts {
+		// Placeholder payees such as "(unknown destination)" are not real
+		// merchants. Offering them as candidates invites the model to MATCH
+		// unrelated withdrawals onto that single fake account.
+		if classifier.IsBlankName(a.Name) {
+			continue
+		}
+		clAccounts = append(clAccounts, classifier.AccountCandidate{ID: a.ID, Name: a.Name})
 	}
 
 	gkey := classifier.GroupKey(j.DestinationName, j.Description)
@@ -141,10 +147,13 @@ func (p *Pipeline) RunWithOptions(ctx context.Context, j *job.Job, txn firefly.T
 	if historyMatchDestID != "" {
 		found := false
 		for _, a := range expenseAccounts {
-			if a.ID == historyMatchDestID {
-				found = true
-				break
+			if a.ID != historyMatchDestID {
+				continue
 			}
+			// Never re-apply a placeholder payee: doing so would keep
+			// collapsing unrelated merchants onto the same fake account.
+			found = !classifier.IsBlankName(a.Name)
+			break
 		}
 		if !found {
 			historyMatchDestID = ""

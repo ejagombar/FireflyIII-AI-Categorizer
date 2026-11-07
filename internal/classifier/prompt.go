@@ -34,6 +34,7 @@ Rules:
 - Never invent categories
 - When uncertain between two categories, pick the one that is less favorable to the user (conservative default)
 - If the description is too vague to even assume, use NEEDS_REVIEW
+- The payee may be missing or a placeholder. When it is, identify the merchant from the description before deciding
 - Respond ONLY with the JSON object, no markdown, no code fences`
 
 const SystemPromptWithDestination = `You are a bank transaction classifier for a personal finance system.
@@ -76,6 +77,7 @@ Destination account rules:
 - When an existing expense account clearly matches the payee, use MATCH with the exact account name from the list.
 - When you are confident the payee represents a new expense account not in the list, use CREATE with a reasonable, concise account name (e.g. "Amazon", "Netflix", "Delta Airlines"). Prefer the canonical business name.
 - Only set destination to null when the destination_name is truly ambiguous (e.g. generic names like "POS Purchase", "Transfer", or empty).
+- If the payee is missing or a placeholder, identify the merchant from the description and use it for both the category and the destination.
 
 Rules:
 - Never invent categories
@@ -144,7 +146,7 @@ func buildUserPrompt(req Request) string {
 		sb.WriteString("Existing expense accounts:\n")
 		for _, a := range req.ExpenseAccounts {
 			// Skip placeholder accounts like "(no name)".
-			if isBlankName(a.Name) {
+			if IsBlankName(a.Name) {
 				continue
 			}
 			fmt.Fprintf(&sb, "  - %s\n", a.Name)
@@ -154,13 +156,14 @@ func buildUserPrompt(req Request) string {
 
 	fmt.Fprintf(&sb, "Available categories:%s\n\n", formatCategories(req.Categories))
 	sb.WriteString("Transaction to classify:\n")
-	// When destination is a blank placeholder, show description instead
-	// so the LLM still has useful context.
-	dest := req.DestinationName
-	if isBlankName(dest) && req.Description != "" {
-		dest = req.Description
+	// A blank placeholder is not a merchant: labelling the raw bank line as the
+	// destination would both duplicate the description and invite the model to
+	// echo it back as an account name.
+	if IsBlankName(req.DestinationName) {
+		sb.WriteString("  Payee: not recorded by the bank — identify the merchant from the description\n")
+	} else {
+		fmt.Fprintf(&sb, "  Payee: %s\n", req.DestinationName)
 	}
-	fmt.Fprintf(&sb, "  Destination: %s\n", dest)
 	fmt.Fprintf(&sb, "  Description: %s\n", req.Description)
 	if req.Amount != nil {
 		fmt.Fprintf(&sb, "  Amount: %.2f\n", *req.Amount)
