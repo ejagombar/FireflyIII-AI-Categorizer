@@ -168,6 +168,28 @@ Repeated transactions from the same merchant benefit from **history-based
 matching**: when enough past transactions agree on the same category and
 destination, the AI call is skipped entirely, reducing latency and API costs.
 
+### Payees that are not merchants
+
+Many banks never send a `destination_name`, so Firefly III stores a placeholder
+such as `(unknown destination)` for every card purchase. Such a value is not a
+merchant, and treating it as one is actively harmful: history would be grouped
+on the placeholder, so the category decided for one shop would be reused for
+every other shop.
+
+Placeholder payees are therefore ignored wherever a merchant is assumed:
+
+- history is keyed on the transaction description instead of the placeholder,
+- placeholder accounts are never offered to the model as destination candidates,
+- a destination matched from history is dropped when it points at a placeholder,
+- the prompt says the payee was not recorded and asks the model to identify the
+  merchant from the description.
+
+A payee counts as blank when it is empty, one of a short list of generic names
+(`no name`, `n/a`, `unknown`, `POS Purchase`, `transfer`, …), wrapped in
+parentheses (Firefly III's convention for a placeholder), or mentions
+`unknown`. Real payees are untouched: when Firefly III holds an actual merchant
+name, that name is used as-is.
+
 ---
 
 ## CLI usage

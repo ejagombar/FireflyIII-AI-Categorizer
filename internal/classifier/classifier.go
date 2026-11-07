@@ -27,18 +27,45 @@ type HistoricalEntry struct {
 // history. When destination_name is absent or a generic placeholder, description
 // is used instead so that past context is still surfaced for nameless payees.
 func GroupKey(destinationName, description string) string {
-	if isBlankName(destinationName) {
+	if IsBlankName(destinationName) {
 		return description
 	}
 	return destinationName
 }
 
-func isBlankName(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", "no name", "(no name)", "unknown", "n/a":
+// blankNames are payee names that carry no merchant information: placeholders
+// written by Firefly III, by importers, or by banks that only stamp the card
+// terminal. Grouping history on one of them would merge unrelated merchants
+// into a single bucket, so they are never treated as a payee.
+var blankNames = map[string]bool{
+	"":                    true,
+	"-":                   true,
+	"--":                  true,
+	"n/a":                 true,
+	"n.a.":                true,
+	"no name":             true,
+	"unknown":             true,
+	"unknown payee":       true,
+	"unknown destination": true,
+	"no registrado":       true,
+	"pos purchase":        true,
+	"card purchase":       true,
+	"purchase":            true,
+	"transfer":            true,
+}
+
+// IsBlankName reports whether a payee name identifies no merchant: it is empty,
+// a known placeholder, wrapped in parentheses (Firefly III's convention for a
+// placeholder account), or mentions "unknown".
+func IsBlankName(s string) bool {
+	norm := strings.ToLower(strings.TrimSpace(s))
+	if blankNames[norm] {
 		return true
 	}
-	return false
+	if strings.Contains(norm, "unknown") || strings.Contains(norm, "no name") {
+		return true
+	}
+	return strings.HasPrefix(norm, "(") && strings.HasSuffix(norm, ")")
 }
 
 // Category is a classifiable Firefly III category with optional notes that
